@@ -2,33 +2,31 @@ import time
 import requests
 import re
 import pytz
+import json
+import configparser
 from datetime import datetime
 
 
 class LOF:
     def __init__(self):
-        # 可注释掉不需要的数据
-        self.s = {
-            "代码": "fund_id",
-            "名称": "fund_nm",
-            # "现价": "price",
-            "涨幅": "increase_rt",
-            # "基金净值": "fund_nav",
-            # "实时估值": "estimate_value",
-            "溢价率": "discount_rt",
-        }
-        # 可在列表中添加想要监控的LOF
-        self.LOFList = [161005, 163402]
+        self.cp = configparser.ConfigParser()
+        self.cp.read("config.cfg", encoding="utf8")
+        if "LOF" and "content" not in list(self.cp.sections()):
+            raise Exception("Please create config.cfg first")
+        self.content = self.cp._sections['content']
+        self.LOFList = json.loads(self.cp.get('LOF','LOFList'))
         self.LOFList.sort()
+        self.disLimit = self.cp.getfloat('LOF', 'disLimit')
+        self.preLimit = self.cp.getfloat('LOF', 'preLimit')
+        if self.disLimit < 0.: self.disLimit = 0.
+        if self.preLimit > 0.: self.preLimit = 0.
+        self.apiKey = self.cp.get('LOF', 'apiKey')
 
         self.session = requests.Session()
         header = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.80 Safari/537.36",}
         self.session.headers.update(header)
         self.urlBase = "https://www.jisilu.cn/data/lof/detail/"
         self.urlLOF = "https://www.jisilu.cn/data/lof/stock_lof_list/?___jsl=LST___t="
-
-        self.apiKey = "ServerChanKey"
-    
 
     def getInfo(self, id):
         r = self.session.get(self.urlLOF + str(int(time.time())*1000))
@@ -40,10 +38,12 @@ class LOF:
 
         res = []
         for row in rows:
-            s = {}
-            for key, value in self.s.items():
-                s[key] = row[value]
-            res.append(s)
+            discount_rt = float(row["discount_rt"][:-1])
+            if discount_rt >= self.disLimit or discount_rt <= self.preLimit:
+                s = {}
+                for key, value in self.content.items():
+                    s[key] = row[value] if value != "fund_id" else "".join(["[", row[value], "](", self.urlBase, row[value], ")"])
+                res.append(s)
         return res
 
     def md(self, info):
@@ -61,8 +61,9 @@ class LOF:
 
     def main(self):
         info = self.getInfo(id)
-        md = self.md(info)
-        self.message(self.apiKey, "LOF-溢价: " + datetime.now(tz=pytz.timezone("Asia/Shanghai")).strftime("%m-%d %H:%M"), md)
+        if len(info):
+            md = self.md(info)
+            self.message(self.apiKey, "LOF-溢价: " + datetime.now(tz=pytz.timezone("Asia/Shanghai")).strftime("%m-%d %H:%M"), md)
 
 
 if __name__ == "__main__":
